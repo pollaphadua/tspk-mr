@@ -1,0 +1,107 @@
+stages:
+  - build
+  - tests_5.6
+  - tests_latest
+  - release
+  - tag_version
+
+build: 
+  stage: build
+  script: 
+    - 'docker run -v $PWD/:/opt/project -w="/opt/project" composer /bin/bash -c "composer install --no-interaction; chmod 777 -R vendor/"'
+  tags:
+  - awcloud-linux
+
+
+unit-tests-latest:
+  stage: tests_latest
+  before_script:
+    - 'docker run -v $PWD/:/opt/project -w="/opt/project" composer /bin/bash -c "composer install --no-interaction; composer dump-autoload -o; chmod 777 -R vendor/"'
+  script:
+    - mkdir -p Settings
+    - echo "{\"AppSid\":\"$WordsAppSid\",\"AppKey\":\"$WordsAppKey\",\"BaseUrl\":\"$WordsBaseUrl\" }" > Settings/servercreds.json
+    - 'docker run -v $PWD:/PHP -v $PWD/Settings/servercreds.json:/servercreds.json -v $PWD/TestData:/TestData -w="/PHP" --rm php:latest /bin/bash -c "vendor/bin/phpunit -c phpunit.xml; chmod 777 -R vendor/ testReports/"'
+  artifacts:
+    paths:
+      - 'testReports/logfile.xml'
+  tags:
+    - awcloud-linux
+
+bdd-tests-latest:
+  stage: tests_latest
+  before_script:
+    - 'docker run -v $PWD/:/opt/project -w="/opt/project" composer /bin/bash -c "composer install --no-interaction; chmod 777 -R vendor/"'
+  script:
+    - mkdir -p Settings
+    - echo "{\"AppSid\":\"$WordsAppSid\",\"AppKey\":\"$WordsAppKey\",\"BaseUrl\":\"$WordsBaseUrl\" }" > Settings/servercreds.json
+    - mkdir -p testReports/bdd
+    - chmod 777 -R testReports/
+    - 'docker run -v $PWD:/PHP -v $PWD/Settings/servercreds.json:/servercreds.json -v $PWD/TestData:/TestData -w="/PHP" --rm php:latest /bin/bash -c "vendor/bin/behat --config=behat.yml --format=junit --out=testReports/bdd; chmod 777 -R vendor/ testReports/"'
+  artifacts:
+    paths:
+      - 'testReports/bdd/*.xml'
+  tags:
+    - awcloud-linux
+
+unit-tests-5.6:
+  stage: tests_5.6
+  before_script:
+    - 'docker run -v $PWD/:/opt/project -w="/opt/project" composer /bin/bash -c "composer install --no-interaction; composer dump-autoload -o; chmod 777 -R vendor/"'
+  script:
+    - mkdir -p Settings
+    - echo "{\"AppSid\":\"$WordsAppSid\",\"AppKey\":\"$WordsAppKey\",\"BaseUrl\":\"$WordsBaseUrl\" }" > Settings/servercreds.json
+    - 'docker run -v $PWD:/PHP -v $PWD/Settings/servercreds.json:/servercreds.json -v $PWD/TestData:/TestData -w="/PHP" --rm php:5.6 /bin/bash -c "vendor/bin/phpunit -c phpunit.xml; chmod 777 -R vendor/ testReports/"'
+  artifacts:
+    paths:
+      - 'testReports/logfile.xml'
+  tags:
+    - awcloud-linux
+
+bdd-tests-5.6:
+  stage: tests_5.6
+  before_script:
+    - 'docker run -v $PWD/:/opt/project -w="/opt/project" composer /bin/bash -c "composer install --no-interaction; chmod 777 -R vendor/"'
+  script:
+    - mkdir -p Settings
+    - echo "{\"AppSid\":\"$WordsAppSid\",\"AppKey\":\"$WordsAppKey\",\"BaseUrl\":\"$WordsBaseUrl\" }" > Settings/servercreds.json
+    - mkdir -p testReports/bdd
+    - chmod 777 -R testReports/
+    - 'docker run -v $PWD:/PHP -v $PWD/Settings/servercreds.json:/servercreds.json -v $PWD/TestData:/TestData -w="/PHP" --rm php:5.6 /bin/bash -c "vendor/bin/behat --config=behat.yml --format=junit --out=testReports/bdd; chmod 777 -R vendor/ testReports/"'
+  artifacts:
+    paths:
+      - 'testReports/bdd/*.xml'
+  tags:
+    - awcloud-linux
+
+add version tag:
+  stage: tag_version
+  only:
+    - release
+  before_script:
+    - $env:ORIGIN += 'https://{0}:{1}@git.auckland.dynabic.com/words-cloud/words-cloud-php.git' -f $env:GIT_CI_USER, $env:GIT_CI_PASS
+    - '$jsonString = ( New-Object System.Net.WebClient ).DownloadString("https://api.aspose.cloud/v4.0/words/swagger/spec")'
+    - '$env:SDK_VERSION = ( ( ConvertFrom-Json -InputObject $jsonString ).info.version | Select-String -Pattern "^\d+\.\d+" ).Matches[0].Value'
+  script: 
+    - git tag -a $env:SDK_VERSION -m 'version $env:SDK_VERSION'
+    - git push $env:ORIGIN $env:SDK_VERSION 
+  tags:
+    - awcloud
+  when: manual
+
+create_release:
+  stage: release
+  only:
+    - master
+  before_script:
+    - "$env:ORIGIN += 'https://{0}:{1}@git.auckland.dynabic.com/words-cloud/words-cloud-php.git' -f $env:GIT_CI_USER, $env:GIT_CI_PASS"
+  script: 
+    - git checkout master
+    - 'git remote set-url origin $env:ORIGIN'
+    - git checkout release
+    - git reset --hard origin/release
+    - git merge --no-ff --allow-unrelated-histories origin/master
+    - git diff --name-status
+    - git push
+  tags:
+    - awcloud
+  when: manual
